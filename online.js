@@ -588,10 +588,18 @@
     if(!O.pinMode||!O.joined||(O.status!=='playing'&&O.status!=='finished'))return;
     O.pinMode=false;updateTopbar();
     const svg=id('trackSvg');if(!svg)return;
-    const rect=svg.getBoundingClientRect();
-    const vb=svg.viewBox.baseVal;
-    const x=vb.x+(e.clientX-rect.left)/rect.width*vb.width;
-    const y=vb.y+(e.clientY-rect.top)/rect.height*vb.height;
+    // Convert browser coordinates with the SVG's actual screen transform.
+    // getBoundingClientRect()/viewBox scaling drifts whenever preserveAspectRatio
+    // adds letterboxing or CSS changes the rendered aspect ratio.
+    let x,y;
+    try{
+      const pt=svg.createSVGPoint();
+      pt.x=e.clientX; pt.y=e.clientY;
+      const ctm=svg.getScreenCTM();
+      if(!ctm) return;
+      const local=pt.matrixTransform(ctm.inverse());
+      x=local.x; y=local.y;
+    }catch{return;}
     try{const data=await request('/api/pin',{method:'POST',body:{roomId:O.roomId,token:O.token,x,y}});O.pin=data.pin||{x,y};renderSharedPin();}catch{}
   }
 

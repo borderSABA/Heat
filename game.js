@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.31';
+  const VERSION = '1.33';
   const TRACKS = {
     classic: {
       id:'classic',
@@ -100,7 +100,7 @@
   function isLocalPlayer(p){
     if(!p) return false;
     if(window.HeatOnlineHooks && typeof window.HeatOnlineHooks.isLocalPlayer==='function') return !!window.HeatOnlineHooks.isLocalPlayer(p);
-    return p===state.players[0];
+    return p===localPlayer();
   }
   function isCpu(p){ return !!(p && p.cpu); }
   function onlineHooks(){ return window.HeatOnlineHooks || null; }
@@ -228,6 +228,20 @@
     };
     drawTo(p,7);
     return p;
+  }
+
+  function randomizeStartingGrid(){
+    // Starting grid order is randomized once per race. The shuffled order is
+    // then baked into each player's id/progress/slot so every online client
+    // receives exactly the same grid through the host snapshot.
+    state.players=shuffle(state.players);
+    state.players.forEach((p,i)=>{
+      p.id=i;
+      p.progress=-Math.floor(i/2)-1;
+      p.startProgress=p.progress;
+      p.slotIndex=0;
+      p.slotSpace=null;
+    });
   }
 
   function reshuffleIfNeeded(p){
@@ -922,8 +936,10 @@ HEAT ${cooled}枚 → エンジン`,2000);
   function startRace(){
     state.started=true; state.round=0; state.players=[]; state.logs=[]; state.winnerOrder=[]; state.standingsOrderIds=[]; state.selected=[]; state.discardSelected=[]; state.playDisplayCards=[]; state.playDisplayPlayerId=null; state.phase='idle';
     for(let i=0;i<state.cpuCount+1;i++) state.players.push(makePlayer(i));
+    randomizeStartingGrid();
     syncAllSlots();
     updateStandingsOrderForRound();
+    log(`スタート順: ${orderPlayers(false).map((p,i)=>`${i+1}.${p.name}`).join(' / ')}`);
     log(`レース開始: ${state.trackName} / ${trackLen()}マス / ${state.players.length}台 / ${state.laps}周`);
     render();
     nextRound();
@@ -1440,7 +1456,9 @@ HEAT ${cooled}枚 → エンジン`,2000);
       state.players.push(makePlayer(i,{cpu:true,name:`CPU ${n+1}`}));
     }
     state.started=true;
+    randomizeStartingGrid();
     syncAllSlots(); updateStandingsOrderForRound();
+    log(`スタート順: ${orderPlayers(false).map((p,i)=>`${i+1}.${p.name}`).join(' / ')}`);
     log(`レース開始: ${state.trackName} / ${trackLen()}マス / ${state.players.length}台 / ${state.laps}周`);
     render(); nextRound();
   }

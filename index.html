@@ -22,9 +22,14 @@
         <span class="brand-sub">Pedal-style card racing prototype</span>
       </div>
       <div class="top-right">
+        <div class="bgm-control" aria-label="BGM音量">
+          <span class="bgm-label">BGM</span>
+          <input id="bgmVolume" class="bgm-volume" type="range" min="0" max="100" step="1" value="5" aria-label="BGM音量" />
+          <span id="bgmVolumeText" class="bgm-volume-text">5%</span>
+        </div>
         <span id="roomBadge" class="room-badge hidden">-</span>
         <button id="leaveRoomBtn" class="ghost-btn hidden" type="button">退出</button>
-        <div class="version">v1.31</div>
+        <div class="version">v1.33</div>
       </div>
     </header>
 
@@ -169,6 +174,8 @@
     </div>
   </div>
 
+  <audio id="bgmAudio" src="assets/bgm.m4a" loop preload="auto"></audio>
+  <script src="bgm.js"></script>
   <script src="online.js"></script>
   <script src="game.js"></script>
 </body>

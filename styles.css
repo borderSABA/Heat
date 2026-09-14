@@ -42,3 +42,11 @@ button{font:inherit}
 @media(max-width:850px){.room-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.lobby-card{padding:14px}.lobby-title{font-size:30px}.online-lobby{padding:8px}.top-right{gap:4px}.room-badge{padding:4px 6px}.lobby-hidden{inset:58px 0 0}}
 
 .shared-pin-ring{fill:none;stroke:#ff3b30;stroke-width:5;filter:drop-shadow(0 0 5px rgba(255,59,48,.8))}.shared-pin-dot{fill:#ff3b30;stroke:#fff;stroke-width:2}.ghost-btn.pin-active{background:#8e2f28;border-color:#ff776d;color:#fff}
+
+
+/* BGM */
+.bgm-control{display:flex;align-items:center;gap:5px;min-width:150px;padding:4px 7px;border:1px solid #55443d;border-radius:8px;background:#191515}
+.bgm-label{font-size:10px;font-weight:900;color:#e6c173;letter-spacing:.04em}
+.bgm-volume{width:82px;height:18px;accent-color:#d55d36;cursor:pointer}
+.bgm-volume-text{width:30px;text-align:right;font-size:10px;font-variant-numeric:tabular-nums;color:#d8c6b4}
+@media(max-width:850px){.bgm-control{min-width:103px;padding:3px 5px;gap:3px}.bgm-volume{width:50px}.bgm-label{font-size:9px}.bgm-volume-text{width:27px;font-size:9px}}
