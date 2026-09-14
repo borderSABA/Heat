@@ -272,8 +272,10 @@
     const a=API(); if(!a||!a.state.started) return;
     if(!O.pending){
       const title=id('phaseTitle'),help=id('phaseHelp'),gear=id('gearControls'),acts=id('actionControls');
-      if(title) title.textContent='他プレイヤーの処理待ち';
-      if(help) help.textContent='ゲーム状態は自動同期されます。あなたの判断が必要になると操作ボタンが表示されます。';
+      const sharedTitle=String(a.state.sharedPhaseTitle||'').trim();
+      const sharedHelp=String(a.state.sharedPhaseHelp||'').trim();
+      if(title) title.textContent=sharedTitle||'他プレイヤーの処理待ち';
+      if(help) help.textContent=sharedHelp||'ゲーム状態は自動同期されます。あなたの判断が必要になると操作ボタンが表示されます。';
       if(gear) gear.innerHTML=''; if(acts) acts.innerHTML='';
     }
   }
@@ -403,12 +405,39 @@
     return answers;
   }
 
+  async function waitForDiscardActions(entries){
+    const answers=new Map();
+    const byRequest=new Map(entries.map(x=>[x.requestId,x]));
+    while(O.joined&&O.isHost&&answers.size<entries.length){
+      const actions=await getActions();
+      for(const action of actions){
+        const entry=byRequest.get(action.requestId);
+        if(!entry || action.playerId!==entry.p.onlinePlayerId || action.type!=='discard') continue;
+        if(!answers.has(entry.p.id)) answers.set(entry.p.id,action.payload||{});
+      }
+      if(answers.size<entries.length) await sleep(250);
+    }
+    return answers;
+  }
+
   function showAllPlayersChoiceWait(done,total){
     const left=Math.max(0,total-done);
-    if(id('phaseTitle')) id('phaseTitle').textContent='全プレイヤーのカード選択待ち';
-    if(id('phaseHelp')) id('phaseHelp').textContent=left>0
-      ? `全員が同時に選択しています。あと ${left}人 の確定待ちです。`
-      : '全員の選択が完了しました。レース処理を開始します。';
+    const title='全プレイヤーのカード選択待ち';
+    const help=left>0 ? `全員が同時に選択しています。あと ${left}人 の確定待ちです。` : '全員の選択が完了しました。レース処理を開始します。';
+    if(API()?.state){API().state.currentProcessingPlayerId=null;API().state.sharedPhaseTitle=title;API().state.sharedPhaseHelp=help;}
+    if(id('phaseTitle')) id('phaseTitle').textContent=title;
+    if(id('phaseHelp')) id('phaseHelp').textContent=help;
+    if(id('gearControls')) id('gearControls').innerHTML='';
+    if(id('actionControls')) id('actionControls').innerHTML='';
+  }
+
+  function showAllPlayersDiscardWait(done,total){
+    const left=Math.max(0,total-done);
+    const title='全プレイヤーの捨て札待ち';
+    const help=left>0 ? `全員が同時に捨て札を選択しています。あと ${left}人 の確定待ちです。` : '全員の捨て札が確定しました。次のラウンドへ進みます。';
+    if(API()?.state){API().state.currentProcessingPlayerId=null;API().state.sharedPhaseTitle=title;API().state.sharedPhaseHelp=help;}
+    if(id('phaseTitle')) id('phaseTitle').textContent=title;
+    if(id('phaseHelp')) id('phaseHelp').textContent=help;
     if(id('gearControls')) id('gearControls').innerHTML='';
     if(id('actionControls')) id('actionControls').innerHTML='';
   }
@@ -505,31 +534,67 @@
   async function handleDiscardPhase(){
     const a=API(), st=a.state;
     const choices=new Map();
+
+    // CPUも同じ捨て札フェーズで即時に選択だけ済ませる。
+    // 実際の手札整理・補充は人間全員の確定後にまとめて行う。
     for(const p of st.players.filter(p=>p.cpu&&!p.finished)) a.cpuDiscard(p);
 
     const me=a.localPlayer();
-    if(me && !me.finished){
+    const remotes=st.players.filter(p=>!p.cpu&&!a.isLocalPlayer(p)&&!p.finished);
+    const remoteEntries=remotes.map(p=>({p,requestId:uuid()}));
+    const localActive=!!(me&&!me.finished);
+    const totalHumans=(localActive?1:0)+remoteEntries.length;
+
+    // 全リモート人間へ先に同時リクエストを発行する。
+    for(const entry of remoteEntries){
+      await setPending(entry.p.onlinePlayerId,{
+        requestId:entry.requestId,
+        type:'discard',
+        payload:{}
+      });
+    }
+    await pushSnapshot();
+
+    // リモート回答待ちを開始したまま、ホストも同時に捨て札を選択する。
+    const remoteAnswersPromise=waitForDiscardActions(remoteEntries);
+    let localPromise=Promise.resolve([]);
+    if(localActive){
       st.phase='discard'; st.selected=[]; st.discardSelected=[];
       if(id('phaseTitle')) id('phaseTitle').textContent='⑧ 捨て札';
-      if(id('phaseHelp')) id('phaseHelp').textContent='不要な速度カードを選び、確定してください。';
+      if(id('phaseHelp')) id('phaseHelp').textContent='不要な速度カードを選び、確定してください。全員同時に選択中です。';
       if(id('gearControls')) id('gearControls').innerHTML='';
       a.render();
-      const localIds=await new Promise(resolve=>{
+      localPromise=new Promise(resolve=>{
         const acts=id('actionControls'); acts.innerHTML='';
         const b=a.button('捨て札を確定','primary',()=>{
           const ids=(st.discardSelected||[]).map(i=>me.hand[i]?.id).filter(Boolean);
           acts.innerHTML=''; resolve(ids);
-        }); acts.appendChild(b);
+        });
+        acts.appendChild(b);
       });
-      choices.set(me.id,localIds);
     }
 
-    for(const p of st.players.filter(p=>!p.cpu&&!a.isLocalPlayer(p)&&!p.finished)){
-      st.phase='onlineWait'; a.render(); await pushSnapshot();
-      const payload=await requestRemoteDecision(p,'discard',{});
-      choices.set(p.id,Array.isArray(payload.cardIds)?payload.cardIds:[]);
+    try{
+      const localIds=await localPromise;
+      if(localActive) choices.set(me.id,localIds);
+
+      st.phase='onlineWait';
+      showAllPlayersDiscardWait(localActive?1:0,totalHumans);
+      a.render();
+
+      const answers=await remoteAnswersPromise;
+      for(const entry of remoteEntries){
+        const payload=answers.get(entry.p.id)||{};
+        choices.set(entry.p.id,Array.isArray(payload.cardIds)?payload.cardIds:[]);
+      }
+      showAllPlayersDiscardWait((localActive?1:0)+answers.size,totalHumans);
+    } finally {
+      for(const entry of remoteEntries){
+        try{await setPending(entry.p.onlinePlayerId,null);}catch{}
+      }
     }
 
+    // 全員が確定してから一括で捨て札処理・使用カード回収・7枚補充を行う。
     for(const p of st.players){
       if(p.cpu) a.cleanupHumanAfterDiscard(p,[]);
       else a.cleanupHumanAfterDiscard(p,choices.get(p.id)||[]);
@@ -544,8 +609,10 @@
     if(!O.pending){renderWaitingUi();return;}
     const pending=O.pending;
     if(O.submittedRequestId===pending.requestId){
-      if(id('phaseTitle')) id('phaseTitle').textContent='送信済み';
-      if(id('phaseHelp')) id('phaseHelp').textContent='ホスト側の処理を待っています。';
+      const sharedTitle=String(a.state.sharedPhaseTitle||'').trim();
+      const sharedHelp=String(a.state.sharedPhaseHelp||'').trim();
+      if(id('phaseTitle')) id('phaseTitle').textContent=sharedTitle||'送信済み';
+      if(id('phaseHelp')) id('phaseHelp').textContent=sharedHelp ? `${sharedHelp}　あなたの選択は送信済みです。` : 'ホスト側の処理を待っています。';
       if(id('gearControls')) id('gearControls').innerHTML=''; if(id('actionControls')) id('actionControls').innerHTML='';
       return;
     }

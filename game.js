@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.34';
+  const VERSION = '1.36';
   const TRACKS = {
     classic: {
       id:'classic',
@@ -82,6 +82,7 @@
     started:false, round:0, laps:2, cpuCount:5, players:[], logs:[],
     phase:'idle', selected:[], discardSelected:[], humanGearChoice:1,
     resolving:false, points:[], winnerOrder:[], standingsOrderIds:[], playDisplayCards:[], playDisplayPlayerId:null,
+    currentProcessingPlayerId:null, sharedPhaseTitle:'', sharedPhaseHelp:'',
     trackId:'classic', trackLen:TRACKS.classic.len, trackCorners:[...TRACKS.classic.corners], trackName:TRACKS.classic.name,
     editor:{open:false,enabled:true,showNumbers:true,showCenters:false,showLine:true,follow:true,followRange:2,selected:[],dirty:false,undo:[],redo:[],defaultPoints:[],drag:null}
   };
@@ -104,6 +105,13 @@
   }
   function isCpu(p){ return !!(p && p.cpu); }
   function onlineHooks(){ return window.HeatOnlineHooks || null; }
+  function setSharedStatus(title='', help='', player=null){
+    state.sharedPhaseTitle=String(title||'');
+    state.sharedPhaseHelp=String(help||'');
+    state.currentProcessingPlayerId=player ? player.id : null;
+    if(ui?.phaseTitle && title) ui.phaseTitle.textContent=title;
+    if(ui?.phaseHelp && help) ui.phaseHelp.textContent=help;
+  }
 
   function chaikinClosed(points, iterations=3){
     let pts=points.map(([x,y])=>({x,y}));
@@ -673,7 +681,10 @@ HEAT ${cooled}枚 → エンジン`,2000);
 
   function renderStandings(){
     const ord=standingsOrder();
-    ui.standings.innerHTML=ord.map((p,i)=>`<div class="standing-row"><div class="standing-pos">${p.finished && p.finishRank ? p.finishRank : i+1}</div><div class="standing-name"><span class="mini-car" style="background:${p.color}"></span>${p.name}${isLocalPlayer(p)?' ★':''}</div><div class="standing-meta">${p.finished?`FINISH / ${p.finishRank}位`:`L${Math.max(1,Math.floor(Math.max(0,p.progress)/trackLen())+1)} / G${p.gear}`}<br>所持HEAT ${p.engineHeat}</div></div>`).join('');
+    ui.standings.innerHTML=ord.map((p,i)=>{
+      const processing=state.currentProcessingPlayerId===p.id;
+      return `<div class="standing-row${processing?' is-processing':''}"><div class="standing-pos">${p.finished && p.finishRank ? p.finishRank : i+1}</div><div class="standing-name"><span class="mini-car" style="background:${p.color}"></span>${p.name}${isLocalPlayer(p)?' ★':''}${processing?'<span class="processing-badge">処理中</span>':''}</div><div class="standing-meta">${p.finished?`FINISH / ${p.finishRank}位`:`L${Math.max(1,Math.floor(Math.max(0,p.progress)/trackLen())+1)} / G${p.gear}`}<br>所持HEAT ${p.engineHeat}</div></div>`;
+    }).join('');
   }
 
   function renderHeatPips(human){
@@ -934,7 +945,7 @@ HEAT ${cooled}枚 → エンジン`,2000);
   function escapeHtml(s){ return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
   function startRace(){
-    state.started=true; state.round=0; state.players=[]; state.logs=[]; state.winnerOrder=[]; state.standingsOrderIds=[]; state.selected=[]; state.discardSelected=[]; state.playDisplayCards=[]; state.playDisplayPlayerId=null; state.phase='idle';
+    state.started=true; state.round=0; state.players=[]; state.logs=[]; state.winnerOrder=[]; state.standingsOrderIds=[]; state.selected=[]; state.discardSelected=[]; state.playDisplayCards=[]; state.playDisplayPlayerId=null; state.currentProcessingPlayerId=null; state.sharedPhaseTitle=''; state.sharedPhaseHelp=''; state.phase='idle';
     for(let i=0;i<state.cpuCount+1;i++) state.players.push(makePlayer(i));
     randomizeStartingGrid();
     syncAllSlots();
@@ -959,6 +970,7 @@ HEAT ${cooled}枚 → エンジン`,2000);
     const tailCount=raceSize>=9 ? 3 : (raceSize>=5 ? 2 : 1);
     active.slice(-tailCount).forEach(p=>p.adrenaline=true);
     state.phase='shift'; state.selected=[]; state.discardSelected=[]; state.playDisplayCards=[]; state.playDisplayPlayerId=null;
+    setSharedStatus('① 全プレイヤー カード選択', '全員が同時にギアとカードを選択します。');
     showMessage(`ROUND ${state.round}`,700);
     log(`--- ROUND ${state.round} ---`);
     if(onlineHooks()?.onRoundReady){ onlineHooks().onRoundReady(); render(); return; }
@@ -1110,25 +1122,29 @@ HEAT ${cooled}枚 → エンジン`,2000);
   async function resolveRound(humanCluttered=false,resumeInfo=null){
     state.phase='resolve'; state.resolving=true;
     ui.gearControls.innerHTML=''; ui.actionControls.innerHTML='';
-    ui.phaseTitle.textContent='③ レース処理';
-    ui.phaseHelp.textContent='先頭車から順番に公開して移動します。';
+    setSharedStatus('③ レース処理', '順位順にカードを公開して処理します。');
     render();
     await sleep(280);
     const order=resumeInfo?.orderIds?.length ? resumeInfo.orderIds.map(id=>state.players.find(p=>p.id===id)).filter(Boolean) : orderPlayers(false);
     const startIndex=Math.max(0,Math.min(order.length,Number(resumeInfo?.startIndex)||0));
     for(let oi=startIndex;oi<order.length;oi++){
       const p=order[oi];
+      setSharedStatus(`③ ${p.name} の処理中`, 'カード公開・移動を処理しています。', p);
+      render();
       if(onlineHooks()?.beforeResolveCar) await onlineHooks().beforeResolveCar(p,oi,order.map(x=>x.id));
       if(p.clutteredRound || (isLocalPlayer(p) && humanCluttered)){ p.clutteredRound=false; await cleanupCluttered(p); continue; }
       if(p.play.length===0){ await cleanupCluttered(p); continue; }
       await resolveCar(p);
     }
+    setSharedStatus('⑧ 全プレイヤー 捨て札', '全員が同時に捨て札を選択します。');
+    render();
     if(onlineHooks()?.beforeDiscardPhase) await onlineHooks().beforeDiscardPhase();
     await beginDiscardPhase();
     state.resolving=false;
   }
 
   async function resolveCar(p){
+    setSharedStatus(`③ ${p.name} の処理中`, 'カードを公開して速度を確定しています。', p);
     state.playDisplayCards=[...p.play];
     state.playDisplayPlayerId=p.id;
     renderPlayArea();
@@ -1156,25 +1172,39 @@ HEAT ${cooled}枚 → エンジン`,2000);
     await sleep(350);
 
     if(p.adrenaline && !p.finished){
+      setSharedStatus(`④ ${p.name}：アドレナリン`, 'アドレナリンの使用を処理しています。', p);
+      render();
       if(p.cpu) await cpuAdrenalineChoice(p);
       else if(isLocalPlayer(p)) await humanAdrenalineChoice(p);
       else if(onlineHooks()?.remoteDecision) await onlineHooks().remoteDecision(p,'adrenaline');
     }
     const cd=(p.gear===1?3:p.gear===2?1:0);
-    if(cd) await applyCooldown(p,cd,'クールダウン');
+    if(cd){
+      setSharedStatus(`④ ${p.name}：クールダウン`, `ギア${p.gear}のクールダウンを処理しています。`, p);
+      render();
+      await applyCooldown(p,cd,'クールダウン');
+    }
     render();
     await sleep(200);
 
     if(!p.finished && shouldBoost(p)){
+      setSharedStatus(`⑤ ${p.name}：ブースト`, 'ブーストを使うか処理しています。', p);
+      render();
       if(p.cpu){ if(cpuWantsBoost(p)) await doBoost(p); }
       else if(isLocalPlayer(p)) await humanBoostChoice(p);
       else if(onlineHooks()?.remoteDecision) await onlineHooks().remoteDecision(p,'boost');
     }
     if(!p.finished){
+      if(canSlipstream(p)){
+        setSharedStatus(`⑥ ${p.name}：スリップストリーム`, 'スリップストリームを処理しています。', p);
+        render();
+      }
       if(p.cpu){ if(canSlipstream(p)&&cpuWantsSlipstream(p)) await doSlipstream(p); }
       else if(isLocalPlayer(p)) await humanSlipstreamChoice(p);
       else if(canSlipstream(p) && onlineHooks()?.remoteDecision) await onlineHooks().remoteDecision(p,'slipstream');
     }
+    setSharedStatus(`⑦ ${p.name}：コーナー判定`, '通過したコーナーの速度制限を確認しています。', p);
+    render();
     await checkCorners(p);
     checkFinish(p);
     render();
@@ -1398,6 +1428,7 @@ HEAT ${cooled}枚 → エンジン`,2000);
     p.play.forEach(c=>p.discard.push(c)); if(p.stressResolvedCards?.length){p.stressResolvedCards.forEach(c=>p.discard.push(c));p.stressResolvedCards=[];} if(p.boostResolvedCards?.length){p.boostResolvedCards.forEach(c=>p.discard.push(c));p.boostResolvedCards=[];} p.play=[]; drawTo(p,7); render(); await sleep(150);
   }
   async function beginDiscardPhase(){
+    setSharedStatus('⑧ 全プレイヤー 捨て札', '不要な速度カードを全員同時に選択します。');
     if(onlineHooks()?.handleDiscardPhase) return await onlineHooks().handleDiscardPhase();
     const human=localPlayer();
     for(const p of state.players.filter(x=>x.cpu && !x.finished)) cpuDiscard(p);
@@ -1421,7 +1452,7 @@ HEAT ${cooled}枚 → エンジン`,2000);
     const candidates=p.hand.filter(x=>x.type==='speed' && Math.abs(x.value-target)>4);
     if(candidates.length && Math.random()<.25){ const card=candidates[0], i=p.hand.indexOf(card); p.hand.splice(i,1); p.discard.push(card); }
   }
-  function finishRoundCleanup(){ state.phase='idle'; state.discardSelected=[]; render(); if(onlineHooks()?.afterRoundCleanup){ onlineHooks().afterRoundCleanup(); return; } setTimeout(nextRound,300); }
+  function finishRoundCleanup(){ state.phase='idle'; state.discardSelected=[]; setSharedStatus('ラウンド終了処理', '次のラウンドを準備しています。'); render(); if(onlineHooks()?.afterRoundCleanup){ onlineHooks().afterRoundCleanup(); return; } setTimeout(nextRound,300); }
 
   function checkRaceEnd(){
     if(!state.started) return false;
@@ -1439,12 +1470,11 @@ HEAT ${cooled}枚 → エンジン`,2000);
     const rows=ranked.map((p,i)=>`<tr><td>${i+1}</td><td>${p.name}</td><td>R${p.finishRound??'-'}</td><td>${p.finishProgress??'-'}</td></tr>`).join('');
     modal('RACE RESULT', `<table class="result-table"><thead><tr><th>順位</th><th>DRIVER</th><th>FINISH</th><th>DISTANCE</th></tr></thead><tbody>${rows}</tbody></table><div class="setup-actions"><button id="againBtn" class="big-start">もう一度</button></div>`);
     $('againBtn').onclick=()=>{ closeModal(); if(onlineHooks()?.onAgain) onlineHooks().onAgain(); else startRace(); };
-    ui.phaseTitle.textContent='レース終了';
-    ui.phaseHelp.textContent='NEW RACEで新しいレースを開始できます。';
+    setSharedStatus('レース終了', 'NEW RACEで新しいレースを開始できます。');
   }
 
   function resetRaceStateForStart(){
-    state.started=false; state.round=0; state.players=[]; state.logs=[]; state.winnerOrder=[]; state.standingsOrderIds=[]; state.selected=[]; state.discardSelected=[]; state.playDisplayCards=[]; state.playDisplayPlayerId=null; state.phase='idle';
+    state.started=false; state.round=0; state.players=[]; state.logs=[]; state.winnerOrder=[]; state.standingsOrderIds=[]; state.selected=[]; state.discardSelected=[]; state.playDisplayCards=[]; state.playDisplayPlayerId=null; state.currentProcessingPlayerId=null; state.sharedPhaseTitle=''; state.sharedPhaseHelp=''; state.phase='idle';
   }
   function startRaceWithRoster(roster,cpuCount=0,laps=2,trackId='classic'){
     resetRaceStateForStart();
@@ -1466,13 +1496,14 @@ HEAT ${cooled}枚 → エンジン`,2000);
     return {
       started:state.started,round:state.round,laps:state.laps,cpuCount:state.cpuCount,players:state.players,logs:state.logs,
       phase:state.phase,winnerOrder:state.winnerOrder,standingsOrderIds:state.standingsOrderIds,playDisplayCards:state.playDisplayCards,playDisplayPlayerId:state.playDisplayPlayerId,
+      currentProcessingPlayerId:state.currentProcessingPlayerId,sharedPhaseTitle:state.sharedPhaseTitle,sharedPhaseHelp:state.sharedPhaseHelp,
       trackId:state.trackId,trackLen:state.trackLen,trackCorners:state.trackCorners,trackName:state.trackName,points:state.points
     };
   }
   function applyNetworkSnapshot(snap){
     if(!snap) return;
     const localSel=[...state.selected], localDiscard=[...state.discardSelected], editor=state.editor;
-    for(const k of ['started','round','laps','cpuCount','players','logs','phase','winnerOrder','standingsOrderIds','playDisplayCards','playDisplayPlayerId','trackId','trackLen','trackCorners','trackName','points']){
+    for(const k of ['started','round','laps','cpuCount','players','logs','phase','winnerOrder','standingsOrderIds','playDisplayCards','playDisplayPlayerId','currentProcessingPlayerId','sharedPhaseTitle','sharedPhaseHelp','trackId','trackLen','trackCorners','trackName','points']){
       if(snap[k]!==undefined) state[k]=snap[k];
     }
     state.editor=editor; state.selected=localSel; state.discardSelected=localDiscard;
@@ -1507,7 +1538,7 @@ HEAT ${cooled}枚 → エンジン`,2000);
     openSetup,closeModal,modal,showLog,showGlossary,startRaceWithRoster,nextRound,askHumanShift,chooseHumanGear,commitHumanCards,cpuChoices,resolveRound,
     humanAdrenalineChoice,cpuAdrenalineChoice,humanBoostChoice,doBoost,humanSlipstreamChoice,doSlipstream,applyCooldown,checkCorners,checkFinish,
     beginDiscardPhase,cpuDiscard,finishRoundCleanup,checkRaceEnd,showResults,makeNetworkSnapshot,applyNetworkSnapshot,applyRemoteRoundChoice,cleanupHumanAfterDiscard,
-    canSlipstream,shouldBoost,cpuWantsBoost,cpuWantsSlipstream,payHeat,coolHeat,selectedKnownSpeed,updateSelectionControls,toggleSelected,toggleDiscard,button,log,showMessage,settleDestination,movePlayerTo,totalCornerHeatCost,drawTo
+    canSlipstream,shouldBoost,cpuWantsBoost,cpuWantsSlipstream,payHeat,coolHeat,selectedKnownSpeed,updateSelectionControls,toggleSelected,toggleDiscard,button,log,showMessage,setSharedStatus,settleDestination,movePlayerTo,totalCornerHeatCost,drawTo
   };
 
   function editorSpaceIndexFromEvent(e){
