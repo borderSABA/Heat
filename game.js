@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.33';
+  const VERSION = '1.34';
   const TRACKS = {
     classic: {
       id:'classic',

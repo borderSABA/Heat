@@ -388,35 +388,99 @@
     }
   }
 
+  async function waitForRoundChoiceActions(entries){
+    const answers=new Map();
+    const byRequest=new Map(entries.map(x=>[x.requestId,x]));
+    while(O.joined&&O.isHost&&answers.size<entries.length){
+      const actions=await getActions();
+      for(const action of actions){
+        const entry=byRequest.get(action.requestId);
+        if(!entry || action.playerId!==entry.p.onlinePlayerId || action.type!=='roundChoice') continue;
+        if(!answers.has(entry.p.id)) answers.set(entry.p.id,action.payload||{});
+      }
+      if(answers.size<entries.length) await sleep(250);
+    }
+    return answers;
+  }
+
+  function showAllPlayersChoiceWait(done,total){
+    const left=Math.max(0,total-done);
+    if(id('phaseTitle')) id('phaseTitle').textContent='全プレイヤーのカード選択待ち';
+    if(id('phaseHelp')) id('phaseHelp').textContent=left>0
+      ? `全員が同時に選択しています。あと ${left}人 の確定待ちです。`
+      : '全員の選択が完了しました。レース処理を開始します。';
+    if(id('gearControls')) id('gearControls').innerHTML='';
+    if(id('actionControls')) id('actionControls').innerHTML='';
+  }
+
   async function collectRoundChoices(checkpointAlreadySaved=false){
     if(!O.isHost||O.suppressRoundReady) return;
     O.executionActive=true;
     const a=API(), st=a.state;
     if(!checkpointAlreadySaved) await saveCheckpoint('roundStart');
-    let localCluttered=false;
+
     const me=a.localPlayer();
+    const remotes=st.players.filter(p=>!p.cpu&&!a.isLocalPlayer(p)&&!p.finished);
+    const remoteEntries=remotes.map(p=>({p,requestId:uuid()}));
+
+    // 全リモート人間へ同時にカード選択要求を出す。
+    for(const entry of remoteEntries){
+      await setPending(entry.p.onlinePlayerId,{
+        requestId:entry.requestId,
+        type:'roundChoice',
+        payload:{gear:entry.p.gear}
+      });
+    }
+    await pushSnapshot();
+
+    // リモート回答待ちは先に開始し、ホストも同時に自分のカードを選ぶ。
+    const remoteAnswersPromise=waitForRoundChoiceActions(remoteEntries);
+    let localPromise=Promise.resolve(false);
     if(me && !me.finished){
       st.phase='shift'; st.selected=[]; st.discardSelected=[];
-      localCluttered=await new Promise(resolve=>{O.localRoundResolver=resolve; a.askHumanShift(); a.render();});
+      localPromise=new Promise(resolve=>{
+        O.localRoundResolver=resolve;
+        a.askHumanShift();
+        a.render();
+      });
+    }
+
+    let localCluttered=false;
+    try{
+      localCluttered=await localPromise;
       O.localRoundResolver=null;
-    }
-    const remotes=st.players.filter(p=>!p.cpu&&!a.isLocalPlayer(p)&&!p.finished);
-    for(const p of remotes){
       st.phase='onlineWait';
-      if(id('phaseTitle')) id('phaseTitle').textContent=`${p.name} のカード選択待ち`;
-      if(id('phaseHelp')) id('phaseHelp').textContent='他プレイヤーがギアとカードを選択しています。';
-      if(id('gearControls')) id('gearControls').innerHTML=''; if(id('actionControls')) id('actionControls').innerHTML='';
-      a.render(); await pushSnapshot();
-      while(true){
-        const payload=await requestRemoteDecision(p,'roundChoice',{gear:p.gear});
-        const result=a.applyRemoteRoundChoice(p,payload);
-        if(result.ok) break;
-        a.log(`${p.name}: 無効なカード選択を再要求`);
+      showAllPlayersChoiceWait((me&&!me.finished)?1:0,((me&&!me.finished)?1:0)+remoteEntries.length);
+      a.render();
+
+      const answers=await remoteAnswersPromise;
+      showAllPlayersChoiceWait(((me&&!me.finished)?1:0)+answers.size,((me&&!me.finished)?1:0)+remoteEntries.length);
+
+      // 全員が確定するまでは他プレイヤーの選択をゲーム状態へ反映しない。
+      // 全員確定後にまとめて適用し、その後初めてCPU選択→レース処理へ進む。
+      for(const entry of remoteEntries){
+        let payload=answers.get(entry.p.id)||{};
+        while(true){
+          const result=a.applyRemoteRoundChoice(entry.p,payload);
+          if(result.ok) break;
+          a.log(`${entry.p.name}: 無効なカード選択を再要求`);
+          payload=await requestRemoteDecision(entry.p,'roundChoice',{gear:entry.p.gear});
+        }
       }
-      a.render(); await pushSnapshot();
+    } finally {
+      O.localRoundResolver=null;
+      for(const entry of remoteEntries){
+        try{await setPending(entry.p.onlinePlayerId,null);}catch{}
+      }
     }
+
     if(localCluttered && me) me.clutteredRound=true;
-    await a.cpuChoices(); await pushSnapshot();
+    st.phase='onlineWait';
+    showAllPlayersChoiceWait(((me&&!me.finished)?1:0)+remoteEntries.length,((me&&!me.finished)?1:0)+remoteEntries.length);
+    a.render();
+    await pushSnapshot();
+    await a.cpuChoices();
+    await pushSnapshot();
     await a.resolveRound(false);
   }
 
