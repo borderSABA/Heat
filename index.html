@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="theme-color" content="#171313" />
+  <title>HEAT Racing Online</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="top-left">
+        <button id="newRaceBtn" class="ghost-btn">NEW RACE</button>
+        <button id="logBtn" class="ghost-btn">LOG</button>
+        <button id="glossaryBtn" class="ghost-btn">用語</button>
+        <button id="trackEditBtn" class="ghost-btn">コース調整</button>
+        <button id="pinBtn" class="ghost-btn hidden" type="button">ピン</button>
+      </div>
+      <div class="brand">
+        <span class="brand-main">HEAT RACING</span>
+        <span class="brand-sub">Pedal-style card racing prototype</span>
+      </div>
+      <div class="top-right">
+        <span id="roomBadge" class="room-badge hidden">-</span>
+        <button id="leaveRoomBtn" class="ghost-btn hidden" type="button">退出</button>
+        <div class="version">v1.28</div>
+      </div>
+    </header>
+
+    <section id="onlineLobby" class="online-lobby">
+      <div class="lobby-card">
+        <div class="lobby-title">HEAT RACING</div>
+        <div class="lobby-subtitle">ONLINE</div>
+        <div id="lobbyStatus" class="lobby-status">サーバーへ接続しています…</div>
+        <div id="roomBrowserView">
+          <label class="name-label" for="playerNameInput">プレイヤー名</label>
+          <input id="playerNameInput" class="name-input" maxlength="32" autocomplete="off" />
+          <div id="roomGrid" class="room-grid"></div>
+        </div>
+        <div id="roomJoinedView" class="room-joined hidden">
+          <div class="joined-head">
+            <div><b id="joinedRoomTitle">ROOM1</b><span id="joinedRoomState" class="joined-state">待機中</span></div>
+            <button id="lobbyLeaveBtn" class="lobby-secondary" type="button">退出</button>
+          </div>
+          <div id="roomPlayerList" class="room-player-list"></div>
+          <div id="roomHostControls" class="room-host-controls"></div>
+          <div id="roomWaitText" class="room-wait-text"></div>
+        </div>
+      </div>
+    </section>
+
+    <main class="game-shell lobby-hidden">
+      <section class="board-wrap">
+<svg id="trackSvg" viewBox="0 0 1100 720" role="img">
+          <defs>
+            <filter id="carShadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity="0.45" />
+            </filter>
+          </defs>
+          <rect x="0" y="0" width="1100" height="720" class="grass"/>
+          <g id="sceneryLayer"></g>
+          <path id="trackWide" class="track-wide" d=""/>
+          <path id="trackInner" class="track-inner" d=""/>
+          <path id="trackCenter" class="track-center" d=""/>
+          <g id="spaceLayer"></g>
+          <g id="cornerLayer"></g>
+          <g id="pinLayer"></g>
+          <g id="carLayer"></g>
+        </svg>
+        <div class="race-message" id="raceMessage"></div>
+      </section>
+
+      <aside class="side-panel">
+        <div id="standings" class="standings"></div>
+        <div id="phasePanel" class="phase-panel">
+          <div class="phase-title" id="phaseTitle">レースを開始してください</div>
+          <div class="phase-help" id="phaseHelp">NEW RACE から人数を選択できます。</div>
+          <div id="gearControls" class="gear-controls"></div>
+          <div id="actionControls" class="action-controls"></div>
+        </div>
+      </aside>
+
+    <section id="trackEditorPanel" class="track-editor-panel hidden" aria-label="コース調整パネル">
+      <div class="editor-head">
+        <div>
+          <b>コース調整</b>
+          <span id="editorTrackName" class="editor-track-name">-</span>
+        </div>
+        <button id="editorCloseBtn" class="editor-close" type="button">×</button>
+      </div>
+      <div class="editor-row editor-status-row">
+        <label class="switch-label"><input id="editorEnabled" type="checkbox" checked> 編集ON</label>
+        <span id="editorSelectedText">選択: なし</span>
+        <span id="editorDirtyText" class="editor-clean">保存済み</span>
+      </div>
+      <div class="editor-row">
+        <label><input id="editorShowNumbers" type="checkbox" checked> マス番号</label>
+        <label><input id="editorShowCenters" type="checkbox"> 中心点</label>
+        <label><input id="editorShowLine" type="checkbox" checked> コース線</label>
+      </div>
+      <div class="editor-row">
+        <label><input id="editorFollow" type="checkbox" checked> 周辺追従</label>
+        <label>範囲
+          <select id="editorFollowRange">
+            <option value="1">±1</option>
+            <option value="2" selected>±2</option>
+            <option value="3">±3</option>
+            <option value="5">±5</option>
+          </select>
+        </label>
+      </div>
+      <div class="editor-help">
+        マスをドラッグで移動。Ctrl/Cmd+クリックで複数選択。矢印キーで1px、Shift+矢印で5px移動。
+      </div>
+      <div class="editor-actions">
+        <button id="editorUndoBtn" type="button">元に戻す</button>
+        <button id="editorRedoBtn" type="button">やり直す</button>
+        <button id="editorResetBtn" type="button">初期位置</button>
+        <button id="editorSaveBtn" type="button" class="editor-primary">保存</button>
+        <button id="editorCopyBtn" type="button">座標コピー</button>
+      </div>
+    </section>
+
+    <section class="player-console">
+      <div class="hand-line">
+        <div class="pile-area deck-area" aria-label="山札">
+          <div class="pile-label">山札</div>
+          <div class="pile-card deck-card">
+            <div class="deck-mark">🏁</div>
+            <div id="deckCountText" class="pile-count">-</div>
+          </div>
+        </div>
+
+        <div id="hand" class="hand"></div>
+
+        <div class="pile-area discard-area" aria-label="捨て札">
+          <div class="pile-label">捨て札</div>
+          <div id="discardTopCard" class="pile-card discard-card-back">
+            <div id="discardFaceContent" class="discard-face-content"><div class="discard-mark">↻</div></div>
+            <div id="discardCountText" class="pile-count">-</div>
+          </div>
+        </div>
+
+        <div class="heat-area" aria-label="残りヒート">
+          <div class="pile-label">残りHEAT</div>
+          <div class="heat-remaining">
+            <span class="heat-flame">🔥</span>
+            <b id="heatText">-</b>
+          </div>
+        </div>
+
+        <div class="play-area" aria-label="プレイカード">
+          <div class="pile-label play-label">プレイカード</div>
+          <div id="playCards" class="play-cards"></div>
+        </div>
+      </div>
+    </section>
+    </main>
+
+
+  </div>
+
+  <div id="modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card">
+      <button id="modalClose" class="modal-x">×</button>
+      <h2 id="modalTitle"></h2>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script src="online.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
